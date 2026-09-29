@@ -1,0 +1,3 @@
+# 交叉编译 Linux 静态二进制时使用 Rust 自带 LLD（Windows 上没有 Linux cc）
+[target.x86_64-unknown-linux-musl]
+linker = "rust-lld"

@@ -1,0 +1,17 @@
+[package]
+name = "accel-client"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "accel-client"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+protocol = { path = "../protocol" }
+windivert = "0.6.0"
+windivert-sys = "0.10.0"
+sysinfo = "0.37"
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock"] }

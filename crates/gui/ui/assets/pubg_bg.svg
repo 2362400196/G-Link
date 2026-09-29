@@ -1,0 +1,165 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f2c42"/>
+      <stop offset=".42" stop-color="#4a4a5e"/>
+      <stop offset=".68" stop-color="#c96f3c"/>
+      <stop offset=".78" stop-color="#f2a95c"/>
+      <stop offset=".82" stop-color="#f7c473"/>
+    </linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e8a45f"/>
+      <stop offset=".08" stop-color="#7e6a54"/>
+      <stop offset=".3" stop-color="#263c52"/>
+      <stop offset="1" stop-color="#141f30"/>
+    </linearGradient>
+    <radialGradient id="sunGlow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#ffe9b0" stop-opacity=".95"/>
+      <stop offset=".35" stop-color="#ffce7a" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#ffce7a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="road" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b3646"/>
+      <stop offset="1" stop-color="#151c28"/>
+    </linearGradient>
+    <radialGradient id="vig" cx=".5" cy=".45" r=".85">
+      <stop offset=".55" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".55"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 天空 -->
+  <rect width="1600" height="740" fill="url(#sky)"/>
+  <circle cx="470" cy="688" r="300" fill="url(#sunGlow)"/>
+  <circle cx="470" cy="692" r="46" fill="#ffe9b8"/>
+  <!-- 云 -->
+  <g fill="#141c2b" opacity=".28">
+    <ellipse cx="300" cy="180" rx="240" ry="26"/>
+    <ellipse cx="760" cy="120" rx="300" ry="22"/>
+    <ellipse cx="1280" cy="210" rx="260" ry="24"/>
+    <ellipse cx="1060" cy="330" rx="200" ry="16" opacity=".6"/>
+  </g>
+  <g fill="#f7c473" opacity=".25">
+    <ellipse cx="560" cy="520" rx="180" ry="12"/>
+    <ellipse cx="240" cy="560" rx="140" ry="10"/>
+  </g>
+
+  <!-- 海 -->
+  <rect y="740" width="1600" height="160" fill="url(#sea)"/>
+  <g stroke="#ffd98f" opacity=".5">
+    <line x1="380" y1="752" x2="560" y2="752" stroke-width="3"/>
+    <line x1="420" y1="766" x2="540" y2="766" stroke-width="2"/>
+    <line x1="360" y1="782" x2="580" y2="782" stroke-width="2" opacity=".6"/>
+    <line x1="450" y1="800" x2="530" y2="800" stroke-width="2" opacity=".4"/>
+  </g>
+  <g stroke="#8fb6d8" opacity=".14" stroke-width="2">
+    <line x1="700" y1="770" x2="900" y2="770"/>
+    <line x1="1000" y1="790" x2="1240" y2="790"/>
+    <line x1="1300" y1="760" x2="1480" y2="760"/>
+  </g>
+
+  <!-- 远景：仓库 + 塔架（海岸线） -->
+  <g fill="#1a2433">
+    <path d="M880 620 L1350 600 L1420 612 L1420 745 L880 745 Z"/>
+    <path d="M880 620 L1350 600 L1362 622 L892 640 Z" fill="#22304442"/>
+    <rect x="1090" y="530" width="16" height="120"/>
+    <path d="M1064 530 L1132 530 L1098 470 Z"/>
+    <rect x="1440" y="470" width="10" height="270"/>
+    <path d="M1414 470 L1476 470 L1445 400 Z"/>
+    <rect x="1418" y="500" width="54" height="6"/>
+    <rect x="1428" y="540" width="34" height="5"/>
+    <rect x="1438" y="580" width="14" height="4"/>
+  </g>
+  <!-- 仓库破洞透光 -->
+  <path d="M1060 660 L1180 654 L1180 745 L1060 745 Z" fill="#f2a95c" opacity=".22"/>
+  <!-- 灯杆与灯 -->
+  <g fill="#101a28">
+    <rect x="1560" y="600" width="7" height="145"/>
+    <path d="M1548 600 L1582 600 L1564 585 Z"/>
+    <circle cx="1564" cy="588" r="7" fill="#ffd98f" opacity=".85"/>
+  </g>
+
+  <!-- 路面 -->
+  <path d="M0 760 L1600 720 L1600 900 L0 900 Z" fill="url(#road)"/>
+  <path d="M690 900 L880 745 L910 745 L760 900 Z" fill="#f7e6c0" opacity=".14"/>
+  <path d="M0 830 L1600 780 L1600 788 L0 840 Z" fill="#f7e6c0" opacity=".07"/>
+
+  <!-- 左侧集装箱群 -->
+  <g>
+    <rect x="20" y="640" width="200" height="120" fill="#22303f"/>
+    <rect x="20" y="640" width="200" height="120" fill="none" stroke="#f2a95c" stroke-opacity=".18" stroke-width="3"/>
+    <g stroke="#141d2a" stroke-width="4" opacity=".8">
+      <line x1="45" y1="640" x2="45" y2="760"/><line x1="80" y1="640" x2="80" y2="760"/>
+      <line x1="115" y1="640" x2="115" y2="760"/><line x1="150" y1="640" x2="150" y2="760"/>
+      <line x1="185" y1="640" x2="185" y2="760"/>
+    </g>
+    <rect x="0" y="700" width="150" height="70" fill="#1c2836"/>
+    <rect x="150" y="712" width="110" height="58" fill="#243244"/>
+    <rect x="150" y="712" width="110" height="58" fill="none" stroke="#f2a95c" stroke-opacity=".14" stroke-width="3"/>
+    <rect x="40" y="770" width="130" height="52" fill="#1a2534"/>
+    <rect x="185" y="776" width="90" height="46" fill="#202c3c"/>
+  </g>
+  <!-- 右下集装箱 -->
+  <g>
+    <rect x="1330" y="660" width="230" height="120" fill="#1e2a3a"/>
+    <rect x="1330" y="660" width="230" height="120" fill="none" stroke="#f2a95c" stroke-opacity=".16" stroke-width="3"/>
+    <g stroke="#131c29" stroke-width="4" opacity=".8">
+      <line x1="1360" y1="660" x2="1360" y2="780"/><line x1="1400" y1="660" x2="1400" y2="780"/>
+      <line x1="1440" y1="660" x2="1440" y2="780"/><line x1="1480" y1="660" x2="1480" y2="780"/>
+      <line x1="1520" y1="660" x2="1520" y2="780"/>
+    </g>
+    <rect x="1420" y="600" width="180" height="60" fill="#223040"/>
+  </g>
+
+  <!-- 铁丝网（中景） -->
+  <g stroke="#0e1722" stroke-width="3" opacity=".55">
+    <line x1="640" y1="700" x2="700" y2="760"/>
+    <line x1="610" y1="720" x2="662" y2="780"/>
+    <line x1="985" y1="690" x2="1040" y2="748"/>
+  </g>
+
+  <!-- 尘雾 -->
+  <rect y="700" width="1600" height="120" fill="#f2a95c" opacity=".06"/>
+  <rect y="730" width="1600" height="60" fill="#f7c473" opacity=".05"/>
+
+  <!-- 士兵剪影（右前景，据枪蹲姿） -->
+  <g fill="#0c1420">
+    <!-- 头盔与头 -->
+    <circle cx="1215" cy="520" r="46"/>
+    <path d="M1170 540 Q1215 500 1262 540 L1262 566 L1170 566 Z"/>
+    <rect x="1238" y="556" width="34" height="20" rx="6"/>
+    <!-- 躯干 + 战术背心 -->
+    <path d="M1150 610 Q1210 574 1284 612 L1300 700 L1300 900 L1120 900 L1120 700 Z"/>
+    <path d="M1168 620 Q1212 596 1268 622 L1272 676 L1164 676 Z" fill="#111c2b"/>
+    <!-- 背包 -->
+    <path d="M1284 612 L1348 648 L1340 720 L1296 706 Z"/>
+    <!-- 伸出的手臂 -->
+    <path d="M1170 640 L1080 690 L1092 716 L1180 676 Z"/>
+    <path d="M1150 668 L1076 706 L1088 730 L1160 694 Z" fill="#0a111c"/>
+    <!-- 枪 -->
+    <rect x="880" y="682" width="230" height="17" rx="5" transform="rotate(-7 880 682)"/>
+    <rect x="1078" y="652" width="66" height="26" rx="6" transform="rotate(-7 1078 652)"/>
+    <rect x="1020" y="700" width="30" height="44" rx="5" transform="rotate(-7 1020 700)"/>
+    <rect x="920" y="698" width="20" height="30" rx="4" transform="rotate(-7 920 698)"/>
+    <path d="M862 690 L910 664 L918 676 L872 702 Z"/>
+    <!-- 腿（蹲姿） -->
+    <path d="M1160 900 L1188 758 L1246 758 L1268 900 Z"/>
+    <path d="M1290 900 L1320 780 L1372 800 L1360 900 Z"/>
+  </g>
+  <!-- 头盔边缘受光 -->
+  <path d="M1180 492 Q1215 470 1250 492" stroke="#f2a95c" stroke-width="5" fill="none" opacity=".5" stroke-linecap="round"/>
+  <!-- 枪身受光 -->
+  <rect x="880" y="682" width="230" height="4" rx="2" fill="#f2a95c" opacity=".4" transform="rotate(-7 880 682)"/>
+
+  <!-- 暗角 -->
+  <rect width="1600" height="900" fill="url(#vig)"/>
+
+  <!-- PUBG 版式（左上） -->
+  <g transform="translate(96 96)">
+    <path d="M0 26 L0 0 L448 0 L448 26 L432 26 L432 16 L16 16 L16 26 Z" fill="#f4f1ea"/>
+    <path d="M0 148 L0 174 L448 174 L448 148 L432 148 L432 158 L16 158 L16 148 Z" fill="#f4f1ea"/>
+    <rect x="0" y="86" width="16" height="28" fill="#f4f1ea"/>
+    <rect x="432" y="86" width="16" height="28" fill="#f4f1ea"/>
+    <text x="224" y="132" text-anchor="middle" font-family="Arial Black, Impact, sans-serif" font-size="104" font-weight="900" letter-spacing="10" fill="#f4f1ea">PUBG</text>
+  </g>
+</svg>

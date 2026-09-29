@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/protocol", "crates/relay-server", "crates/accelctl", "crates/accel-client", "crates/gui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }

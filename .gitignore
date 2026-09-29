@@ -1,0 +1,24 @@
+# ===== 构建产物 =====
+/target
+crates/gui/gen/
+
+# ===== 分发产物（本地保留，不入库） =====
+/dist/
+/G-Link-加速器.zip
+
+# ===== WinDivert 驱动（体积大且为微软签名二进制，不入库）=====
+/third_party
+
+# ===== 敏感配置 =====
+# 令牌只应出现在本地配置或部署环境，不要提交密钥文件
+*.pem
+*.key
+.env
+
+# ===== 系统与编辑器 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp

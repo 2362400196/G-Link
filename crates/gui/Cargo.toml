@@ -1,0 +1,12 @@
+[package]
+name = "pubg-accel-gui"
+version.workspace = true
+edition.workspace = true
+
+[build-dependencies]
+tauri-build = "2"
+
+[dependencies]
+tauri = "2"
+window-vibrancy = "0.5"
+protocol = { path = "../protocol" }
