@@ -543,3 +543,33 @@ svg.ic{flex-shrink:0}
 }
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .toast.err{border-color:rgba(239,77,110,.45);color:var(--red)}
+
+/* ============ 自定义加速：拖拽上传区 ============ */
+.dropzone{
+  position:relative;height:180px;border:2px dashed #c3cdd4;border-radius:14px;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  background:rgba(248,250,251,.6);overflow:hidden;transition:all .2s;margin-bottom:4px;
+}
+.dropzone:hover{border-color:rgba(16,185,129,.55);background:rgba(236,253,245,.7)}
+.dropzone.dragover{border-color:#10b981;border-style:solid;background:rgba(209,250,229,.85);box-shadow:inset 0 0 0 2px rgba(16,185,129,.18)}
+.dz-preview{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.dz-hint{
+  display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;
+  color:var(--text-low2);font-size:12px;pointer-events:none;padding:0 20px;
+}
+.dz-hint svg{width:34px;height:34px;color:#9aa8b0;transition:transform .2s}
+.dropzone:hover .dz-hint svg{transform:translateY(-3px);color:#10b981}
+.dz-hint b{font-size:13px;color:var(--text-mid);font-weight:600}
+.dropzone.has-img .dz-hint{display:none}
+
+/* 游戏库：自定义加速添加卡 + 删除角标 */
+.game-card.add{border:1.5px dashed #c3cdd4;opacity:.85}
+.game-card.add:hover{border-color:rgba(16,185,129,.55);opacity:1}
+.game-card.add .g-icon{color:#10b981}
+.game-card .g-del{
+  position:absolute;top:7px;right:8px;width:20px;height:20px;border-radius:50%;
+  display:none;align-items:center;justify-content:center;font-size:13px;line-height:1;
+  color:#98a4ac;background:rgba(255,255,255,.85);border:1px solid var(--hairline);z-index:2;
+}
+.game-card:hover .g-del{display:flex}
+.game-card .g-del:hover{color:#fff;background:var(--red);border-color:var(--red)}

@@ -137,14 +137,14 @@
           <div class="boost-hero">
             <div class="hero-top">
               <div class="game-cover">
-                <img class="cover-img" draggable="false" alt="" src="assets/pubg_bg.jpg" onerror="this.onerror=null;this.src='assets/pubg_bg.svg'" />
+                <img class="cover-img" id="coverImg" draggable="false" alt="" src="assets/pubg_bg.jpg" onerror="this.onerror=null;this.src='assets/pubg_bg.svg'" />
                 <div class="cover-shade"></div>
-                <div class="gname">绝地求生</div>
-                <div class="gsub">PUBG: BATTLEGROUNDS</div>
+                <div class="gname" id="coverName">绝地求生</div>
+                <div class="gsub" id="coverSub">PUBG: BATTLEGROUNDS</div>
               </div>
 
               <div class="boost-info">
-                <h2>绝地求生 · PUBG</h2>
+                <h2 id="gameTitle">绝地求生 · PUBG</h2>
                 <div class="desc"><span class="detect-dot on" id="detectDot"></span><span id="detectTxt">目标进程 · TslGame.exe</span></div>
                 <div class="tag-row">
                   <span class="tag">
@@ -345,6 +345,34 @@
     <div class="dialog-btns">
       <button class="btn ghost" id="dlgCancel">取消</button>
       <button class="btn primary" id="dlgOk">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- 自定义加速游戏对话框 -->
+<div class="overlay" id="customOverlay">
+  <div class="dialog">
+    <div class="dialog-title">自定义加速</div>
+    <div class="dropzone" id="dropzone" title="点击选择图片">
+      <img id="dzPreview" class="dz-preview" alt="" hidden />
+      <div class="dz-hint" id="dzHint">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <b>拖拽图片到此处，或点击选择</b>
+        <span>支持 JPG / PNG · 自动裁剪为封面比例</span>
+      </div>
+    </div>
+    <input type="file" id="dzFile" accept="image/*" hidden />
+    <label class="field">
+      <span class="field-label">游戏名称</span>
+      <input id="cgName" spellcheck="false" placeholder="如：永劫无间" />
+    </label>
+    <label class="field">
+      <span class="field-label">加速进程（游戏主程序 exe 名）</span>
+      <input id="cgProc" spellcheck="false" placeholder="如：NarakaBlade.exe" />
+    </label>
+    <div class="dialog-btns">
+      <button class="btn ghost" id="cgCancel">取消</button>
+      <button class="btn primary" id="cgSave">保存并使用</button>
     </div>
   </div>
 </div>

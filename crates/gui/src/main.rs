@@ -285,6 +285,7 @@ fn probe_once(addr: &str, token: &str) -> Result<Option<f64>, String> {
 fn ping_direct(ip: String) -> Option<f64> {
     let out = std::process::Command::new("ping")
         .args(["-n", "1", "-w", "900", &ip])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
     let s = String::from_utf8_lossy(&out.stdout);

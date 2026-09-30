@@ -412,6 +412,7 @@ function renderLoss() {
 async function selectGame(name, proc) {
   const prev = $("cfgProc").value.trim() || DEFAULT_PROC;
   localStorage.setItem("pubg_accel_game", name);
+  applyHeroCover(name);
   $("cfgProc").value = proc;
   saveCfg();
   $("detectTxt").textContent = "目标进程 · " + proc + " · UDP 智能分流";
@@ -436,6 +437,7 @@ function renderGames() {
   const s = selNode();
   const ping = s && s.lat != null ? Math.round(s.lat) : null;
   const curGame = localStorage.getItem("pubg_accel_game") || "绝地求生";
+  // 绝地求生（内置）
   const card = document.createElement("div");
   card.className = "game-card" + (curGame === "绝地求生" ? " selected" : "");
   const icon = document.createElement("img");
@@ -449,12 +451,144 @@ function renderGames() {
   card.append(icon, meta);
   card.addEventListener("click", () => selectGame("绝地求生", "TslGame.exe"));
   grid.appendChild(card);
-  const soon = document.createElement("div");
-  soon.className = "game-card soon";
-  soon.innerHTML = `<div class="g-icon soon">+</div><div class="g-meta"><div class="g-title">更多游戏</div><div class="g-ping"><span class="g-ping-txt">支持开发中，敬请期待</span></div></div>`;
-  soon.addEventListener("click", () => showToast("更多游戏支持开发中"));
-  grid.appendChild(soon);
+  // 自定义游戏卡
+  for (const g of loadCustomGames()) {
+    const c = document.createElement("div");
+    c.className = "game-card" + (curGame === g.name ? " selected" : "");
+    const ic = document.createElement("img");
+    ic.className = "g-icon-img"; ic.draggable = false; ic.alt = g.name;
+    ic.src = g.img || "assets/pubg_bg.svg";
+    ic.onerror = () => { ic.onerror = null; ic.src = "assets/logo.png"; };
+    const mt = document.createElement("div");
+    mt.className = "g-meta";
+    const t = document.createElement("div"); t.className = "g-title"; t.textContent = g.name;
+    const p = document.createElement("div"); p.className = "g-ping";
+    const pt = document.createElement("span"); pt.className = "g-ping-txt"; pt.textContent = g.proc;
+    p.append(pt); mt.append(t, p);
+    const del = document.createElement("div");
+    del.className = "g-del"; del.textContent = "×"; del.title = "删除该游戏";
+    del.addEventListener("click", (e) => { e.stopPropagation(); removeCustomGame(g.name); });
+    c.append(ic, mt, del);
+    c.addEventListener("click", () => selectGame(g.name, g.proc));
+    grid.appendChild(c);
+  }
+  // 自定义加速（添加卡）
+  const add = document.createElement("div");
+  add.className = "game-card add";
+  add.innerHTML = `<div class="g-icon soon">+</div><div class="g-meta"><div class="g-title">自定义加速</div><div class="g-ping"><span class="g-ping-txt">添加自定义游戏</span></div></div>`;
+  add.addEventListener("click", openCustomDialog);
+  grid.appendChild(add);
 }
+
+/* ---------- 自定义加速游戏 ---------- */
+const CUSTOM_KEY = "pubg_accel_custom_games";
+function loadCustomGames() {
+  try { return JSON.parse(localStorage.getItem(CUSTOM_KEY)) || []; } catch { return []; }
+}
+function saveCustomGames(list) { localStorage.setItem(CUSTOM_KEY, JSON.stringify(list)); }
+
+/* 主页封面/标题联动：自定义游戏显示其封面，PUBG 恢复默认 */
+function applyHeroCover(name) {
+  const g = loadCustomGames().find((x) => x.name === name);
+  const img = $("coverImg");
+  if (g) {
+    img.onerror = null;
+    img.src = g.img || "assets/pubg_bg.jpg";
+    $("coverName").textContent = g.name;
+    $("coverSub").textContent = "自定义游戏";
+    $("gameTitle").textContent = g.name;
+  } else {
+    img.onerror = function () { this.onerror = null; this.src = "assets/pubg_bg.svg"; };
+    img.src = "assets/pubg_bg.jpg";
+    $("coverName").textContent = "绝地求生";
+    $("coverSub").textContent = "PUBG: BATTLEGROUNDS";
+    $("gameTitle").textContent = "绝地求生 · PUBG";
+  }
+}
+
+function removeCustomGame(name) {
+  saveCustomGames(loadCustomGames().filter((g) => g.name !== name));
+  if (localStorage.getItem("pubg_accel_game") === name) {
+    localStorage.setItem("pubg_accel_game", "绝地求生");
+    applyHeroCover("绝地求生");
+  }
+  renderGames();
+  showToast(`已删除「${name}」`);
+  pushLog(`已删除自定义游戏「${name}」`, "sys");
+}
+
+let dzData = null; // 当前选择的封面 dataURL
+function openCustomDialog() {
+  dzData = null;
+  $("cgName").value = "";
+  $("cgProc").value = "";
+  $("dzPreview").hidden = true;
+  $("dzPreview").removeAttribute("src");
+  $("dropzone").classList.remove("has-img");
+  $("customOverlay").classList.add("on");
+}
+function closeCustomDialog() { $("customOverlay").classList.remove("on"); }
+$("cgCancel").addEventListener("click", closeCustomDialog);
+$("customOverlay").addEventListener("click", (e) => { if (e.target === $("customOverlay")) closeCustomDialog(); });
+
+const dz = $("dropzone");
+dz.addEventListener("click", () => $("dzFile").click());
+$("dzFile").addEventListener("change", (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (f) handleImage(f);
+  e.target.value = "";
+});
+dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("dragover"); });
+dz.addEventListener("dragleave", () => dz.classList.remove("dragover"));
+dz.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dz.classList.remove("dragover");
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f && f.type.startsWith("image/")) handleImage(f);
+  else if (f) showToast("请拖入图片文件", true);
+});
+// 阻止把图拖进窗口其他位置触发浏览器默认打开
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => e.preventDefault());
+
+function handleImage(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      // 居中裁剪为 264×344 封面比例并压缩，控制 localStorage 占用
+      const W = 264, H = 344;
+      const cv = document.createElement("canvas");
+      cv.width = W; cv.height = H;
+      const ctx = cv.getContext("2d");
+      const r = Math.max(W / img.width, H / img.height);
+      const w = img.width * r, h = img.height * r;
+      ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+      dzData = cv.toDataURL("image/jpeg", 0.85);
+      $("dzPreview").src = dzData;
+      $("dzPreview").hidden = false;
+      dz.classList.add("has-img");
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+$("cgSave").addEventListener("click", () => {
+  const proc = $("cgProc").value.trim();
+  if (!proc) { showToast("请填写游戏进程名（如 xxx.exe）", true); return; }
+  let name = $("cgName").value.trim();
+  if (!name) name = proc.replace(/\.exe$/i, "");
+  const list = loadCustomGames();
+  if (list.some((g) => g.name === name)) { showToast("已存在同名游戏", true); return; }
+  list.push({ name, proc, img: dzData });
+  if (JSON.stringify(list).length > 4000000) { showToast("图片总体积过大，请更换更小的图片", true); return; }
+  saveCustomGames(list);
+  closeCustomDialog();
+  renderGames();
+  selectGame(name, proc);
+  pushLog(`已添加自定义游戏「${name}」并绑定进程 ${proc}`, "sys");
+});
 
 /* 搜索过滤游戏卡 */
 $("searchInput").addEventListener("input", (e) => {
@@ -666,6 +800,7 @@ modeSwitch.addEventListener("click", (e) => {
 /* ---------- 启动 ---------- */
 loadCfg();
 renderNodes();
+applyHeroCover(localStorage.getItem("pubg_accel_game") || "绝地求生");
 renderToday();
 setLatency(null);
 $("detectTxt").textContent = "目标进程 · " + ($("cfgProc").value.trim() || DEFAULT_PROC) + " · UDP 智能分流";
