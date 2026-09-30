@@ -1,3 +1,7 @@
 # 交叉编译 Linux 静态二进制时使用 Rust 自带 LLD（Windows 上没有 Linux cc）
 [target.x86_64-unknown-linux-musl]
 linker = "rust-lld"
+
+# windivert-sys 构建所需：指向 WinDivert 库文件目录
+[env]
+WINDIVERT_PATH = "C:\\Users\\23624\\Desktop\\pubg\\third_party\\WinDivert-2.2.2-A\\x64"

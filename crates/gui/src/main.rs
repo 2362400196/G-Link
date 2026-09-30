@@ -193,14 +193,10 @@ async fn probe_node(addr: String, token: String) -> Result<Option<f64>, String> 
 
 fn probe_once(addr: &str, token: &str) -> Result<Option<f64>, String> {
     use std::net::UdpSocket;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-    let sock = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
-    let dest = if addr.contains(':') {
-        addr.to_string()
-    } else {
-        format!("{addr}:41000")
-    };
-    sock.connect(&dest).map_err(|e| e.to_string())?;
+    use protocol::crypto;
+    use protocol::DIR_CLIENT;
 
     // 会话号：pid ^ 时间纳秒，避免与引擎/其他探测冲突
     let session = {
@@ -211,24 +207,46 @@ fn probe_once(addr: &str, token: &str) -> Result<Option<f64>, String> {
         std::process::id() ^ nanos.rotate_left(16)
     };
 
-    // 1) OPEN(echo) 建立回显会话
+    // v2 加密发包：header(明文) + nonce + AEAD(载荷)
+    let counter = AtomicU64::new(0);
+    let seal = |counter: &AtomicU64, kind: u8, seq: u16, payload: &[u8]| -> Vec<u8> {
+        let key = crypto::session_key(token, session);
+        let mut pkt = Vec::with_capacity(
+            protocol::HEADER_LEN + crypto::NONCE_LEN + payload.len() + crypto::TAG_LEN,
+        );
+        protocol::write_header(
+            &mut pkt,
+            kind,
+            session,
+            seq,
+            crypto::NONCE_LEN + payload.len() + crypto::TAG_LEN,
+        );
+        let c = counter.fetch_add(1, Ordering::Relaxed) + 1;
+        pkt.extend(crypto::encrypt(&key, &pkt[..protocol::HEADER_LEN], payload, DIR_CLIENT, c));
+        pkt
+    };
+
+    let sock = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+    let dest = if addr.contains(':') {
+        addr.to_string()
+    } else {
+        format!("{addr}:41000")
+    };
+    sock.connect(&dest).map_err(|e| e.to_string())?;
+
+    // 1) OPEN(echo) 建立回显会话（加密，解密成功即完成认证）
     let open_payload = protocol::encode_open(token, "echo");
-    let mut pkt = Vec::new();
-    protocol::write_header(&mut pkt, protocol::TYPE_OPEN, session, 0, open_payload.len());
-    pkt.extend_from_slice(&open_payload);
-    sock.send(&pkt).map_err(|e| e.to_string())?;
+    sock.send(&seal(&counter, protocol::TYPE_OPEN, 0, &open_payload)).map_err(|e| e.to_string())?;
 
     // 2) DATA(seq=0)，载荷含毫秒时间戳确保每个包内容唯一（规避链路反重放）
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    let mut req = Vec::with_capacity(protocol::HEADER_LEN + 8);
-    protocol::write_header(&mut req, protocol::TYPE_DATA, session, 0, 8);
-    req.extend_from_slice(&ts.to_le_bytes());
-    sock.send(&req).map_err(|e| e.to_string())?;
+    sock.send(&seal(&counter, protocol::TYPE_DATA, 0, &ts.to_le_bytes()))
+        .map_err(|e| e.to_string())?;
 
-    // 3) 等 DATA(seq=0) 回包（relay 对 echo 会话原样回 DATA）
+    // 3) 等 DATA(seq=0) 回包（relay 对 echo 会话原样回 DATA）并解密
     let t0 = Instant::now();
     let deadline = t0 + Duration::from_millis(2500);
     let mut buf = [0u8; 512];
@@ -238,10 +256,13 @@ fn probe_once(addr: &str, token: &str) -> Result<Option<f64>, String> {
         let _ = sock.set_read_timeout(Some(remain));
         match sock.recv_from(&mut buf) {
             Ok((n, _)) => {
-                if let Some((h, _)) = protocol::parse(&buf[..n]) {
+                if let Some((h, wire)) = protocol::parse(&buf[..n]) {
                     if h.kind == protocol::TYPE_DATA && h.session == session && h.seq == 0 {
-                        got = true;
-                        break;
+                        let key = crypto::session_key(token, h.session);
+                        if crypto::decrypt(&key, &buf[..protocol::HEADER_LEN], wire).is_some() {
+                            got = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -250,15 +271,34 @@ fn probe_once(addr: &str, token: &str) -> Result<Option<f64>, String> {
     }
 
     // 4) CLOSE 清理会话（尽力而为）
-    let mut close_pkt = Vec::new();
-    protocol::write_header(&mut close_pkt, protocol::TYPE_CLOSE, session, 0, 0);
-    let _ = sock.send(&close_pkt);
+    let _ = sock.send(&seal(&counter, protocol::TYPE_CLOSE, 0, &[]));
 
     if got {
         Ok(Some(t0.elapsed().as_secs_f64() * 1000.0))
     } else {
         Ok(None)
     }
+}
+
+/// 直连延迟基准：对游戏服务器 IP 发一次 ICMP ping（系统 ping.exe，无需 raw socket）
+#[tauri::command]
+fn ping_direct(ip: String) -> Option<f64> {
+    let out = std::process::Command::new("ping")
+        .args(["-n", "1", "-w", "900", &ip])
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&out.stdout);
+    // 中文系统："时间=52ms"；英文："time=52ms"
+    for key in ["时间=", "time="] {
+        if let Some(i) = s.find(key) {
+            let rest = &s[i + key.len()..];
+            let num: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(v) = num.parse::<f64>() {
+                return Some(v);
+            }
+        }
+    }
+    None
 }
 
 fn main() {
@@ -281,7 +321,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_engine, stop_engine, engine_running, engine_logs, probe_node, detect_game])
+        .invoke_handler(tauri::generate_handler![start_engine, stop_engine, engine_running, engine_logs, probe_node, detect_game, ping_direct])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 kill_child(&window.app_handle().state::<Engine>());

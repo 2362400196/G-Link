@@ -6,13 +6,15 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use protocol::crypto;
 use protocol::{
-    parse, parse_open, write_header, TYPE_CLOSE, TYPE_DATA, TYPE_KEEPALIVE, TYPE_OPEN,
-    HEADER_LEN,
+    parse, parse_open, write_header, DIR_RELAY, TYPE_CLOSE, TYPE_DATA, TYPE_KEEPALIVE,
+    TYPE_OPEN, HEADER_LEN,
 };
 use tokio::net::UdpSocket;
 
@@ -63,16 +65,42 @@ struct Relay {
     timeout: Duration,
     sessions: Mutex<HashMap<u32, Session>>,
     pending: Mutex<HashMap<u32, Pending>>,
+    /// 发往客户端方向的 nonce 计数器（全局递增）
+    counter: AtomicU64,
 }
 
 impl Relay {
+    /// 构造发往客户端的加密 DATA 包（v2）
+    fn encrypt_data(&self, session: u32, seq: u16, payload: &[u8]) -> Vec<u8> {
+        let key = crypto::session_key(&self.token, session);
+        let mut buf = Vec::with_capacity(
+            HEADER_LEN + crypto::NONCE_LEN + payload.len() + crypto::TAG_LEN,
+        );
+        write_header(
+            &mut buf,
+            TYPE_DATA,
+            session,
+            seq,
+            crypto::NONCE_LEN + payload.len() + crypto::TAG_LEN,
+        );
+        let c = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
+        buf.extend(crypto::encrypt(&key, &buf[..HEADER_LEN], payload, DIR_RELAY, c));
+        buf
+    }
+
     async fn handle(self: &Arc<Self>, buf: &[u8], from: SocketAddr) {
-        let Some((hdr, payload)) = parse(buf) else {
+        let Some((hdr, wire)) = parse(buf) else {
+            return;
+        };
+        // v2：所有包均为密文。解密失败 = 令牌不符或包被篡改，静默丢弃（等效认证）
+        let key = crypto::session_key(&self.token, hdr.session);
+        let Some(payload) = crypto::decrypt(&key, &buf[..HEADER_LEN], wire) else {
+            println!("decrypt failed from {from} (bad token or forged packet)");
             return;
         };
         match hdr.kind {
-            TYPE_OPEN => self.open(hdr.session, payload, from).await,
-            TYPE_DATA => self.data(hdr.session, hdr.seq, payload).await,
+            TYPE_OPEN => self.open(hdr.session, &payload, from).await,
+            TYPE_DATA => self.data(hdr.session, hdr.seq, &payload).await,
             TYPE_KEEPALIVE => {
                 if let Some(s) = self.sessions.lock().unwrap().get_mut(&hdr.session) {
                     s.last_seen = Instant::now();
@@ -185,9 +213,7 @@ impl Relay {
         match target {
             Target::Echo => {
                 // 回显真实 seq：既保证客户端按序匹配，也保证每个回包内容唯一
-                let mut buf = Vec::with_capacity(HEADER_LEN + payload.len());
-                write_header(&mut buf, TYPE_DATA, session, seq, payload.len());
-                buf.extend_from_slice(payload);
+                let buf = self.encrypt_data(session, seq, payload);
                 let _ = self.sock.send_to(&buf, client).await;
             }
             Target::Udp(up) => {
@@ -196,7 +222,7 @@ impl Relay {
         }
     }
 
-    /// 把目标的回包封装成 DATA 送回客户端
+    /// 把目标的回包加密封装成 DATA 送回客户端
     async fn send_data(&self, session: u32, payload: &[u8]) {
         let client = {
             self.sessions
@@ -206,9 +232,7 @@ impl Relay {
                 .map(|s| s.client)
         };
         if let Some(client) = client {
-            let mut buf = Vec::with_capacity(HEADER_LEN + payload.len());
-            write_header(&mut buf, TYPE_DATA, session, 0, payload.len());
-            buf.extend_from_slice(payload);
+            let buf = self.encrypt_data(session, 0, payload);
             let _ = self.sock.send_to(&buf, client).await;
         }
     }
@@ -230,6 +254,7 @@ async fn main() -> Result<()> {
         timeout: Duration::from_secs(args.session_timeout),
         sessions: Mutex::new(HashMap::new()),
         pending: Mutex::new(HashMap::new()),
+        counter: AtomicU64::new(0),
     });
 
     // 空闲会话回收

@@ -16,7 +16,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use protocol::{encode_open, parse, write_header, TYPE_DATA, TYPE_KEEPALIVE, TYPE_OPEN};
+use protocol::crypto;
+use protocol::{encode_open, parse, write_header, DIR_CLIENT, TYPE_DATA, TYPE_KEEPALIVE, TYPE_OPEN};
 use windivert::address::WinDivertAddress;
 use windivert::prelude::*;
 use windivert::WinDivert;
@@ -108,6 +109,8 @@ struct Shared {
     banner_shown: AtomicBool,
     /// 延迟探针会话（0 = 未建立；回包不注入，用于测隧道 RTT）
     probe_session: AtomicU32,
+    /// 发往中转方向的 nonce 计数器（全局递增）
+    nonce_counter: AtomicU64,
 }
 
 impl Shared {
@@ -287,9 +290,20 @@ fn build_ip_udp(src: Ipv4Addr, sport: u16, dst: Ipv4Addr, dport: u16, payload: &
 }
 
 fn send_tunnel(shared: &Shared, kind: u8, session: u32, seq: u16, payload: &[u8]) -> Result<()> {
-    let mut pkt = Vec::with_capacity(protocol::HEADER_LEN + payload.len());
-    write_header(&mut pkt, kind, session, seq, payload.len());
-    pkt.extend_from_slice(payload);
+    // v2 加密：header(明文) | nonce | AEAD(载荷)
+    let key = crypto::session_key(&shared.token, session);
+    let mut pkt = Vec::with_capacity(
+        protocol::HEADER_LEN + crypto::NONCE_LEN + payload.len() + crypto::TAG_LEN,
+    );
+    write_header(
+        &mut pkt,
+        kind,
+        session,
+        seq,
+        crypto::NONCE_LEN + payload.len() + crypto::TAG_LEN,
+    );
+    let c = shared.nonce_counter.fetch_add(1, Ordering::Relaxed) + 1;
+    pkt.extend(crypto::encrypt(&key, &pkt[..protocol::HEADER_LEN], payload, DIR_CLIENT, c));
     shared.tunnel.send(&pkt)?;
     Ok(())
 }
@@ -372,7 +386,8 @@ fn passthrough(shared: &Shared, addr_out: &WinDivertAddress<NetworkLayer>, raw: 
 
 /// 回包线程：隧道 DATA → 伪造入站包注入协议栈
 fn reply_loop(shared: Arc<Shared>) -> Result<()> {
-    let mut rbuf = vec![0u8; MAX_PACKET + protocol::HEADER_LEN];
+    // v2 包 = header + nonce + 载荷 + tag，比 v1 多 28 字节
+    let mut rbuf = vec![0u8; MAX_PACKET + protocol::HEADER_LEN + crypto::NONCE_LEN + crypto::TAG_LEN];
     loop {
         let len = match shared.tunnel.recv(&mut rbuf) {
             Ok(l) => l,
@@ -381,8 +396,13 @@ fn reply_loop(shared: Arc<Shared>) -> Result<()> {
                 continue;
             }
         };
-        let Some((hdr, payload)) = parse(&rbuf[..len]) else { continue };
+        let Some((hdr, wire)) = parse(&rbuf[..len]) else { continue };
         if hdr.kind != TYPE_DATA { continue; }
+        // v2：解密回包（失败 = 令牌不符或包损坏，丢弃）
+        let key = crypto::session_key(&shared.token, hdr.session);
+        let Some(payload) = crypto::decrypt(&key, &rbuf[..protocol::HEADER_LEN], wire) else {
+            continue;
+        };
 
         // 延迟探针回包：不注入协议栈，仅计算 RTT
         let probe = shared.probe_session.load(Ordering::Relaxed);
@@ -416,7 +436,7 @@ fn reply_loop(shared: Arc<Shared>) -> Result<()> {
         };
         let (src_ip, dst_ip, dst_port, local_port, if_idx, sub_if_idx) = rec;
         ip_id_add();
-        let bytes = build_ip_udp(dst_ip, dst_port, src_ip, local_port, payload, ip_id_get());
+        let bytes = build_ip_udp(dst_ip, dst_port, src_ip, local_port, &payload, ip_id_get());
         let mut pkt = unsafe { <WinDivertPacket<'static, NetworkLayer>>::new(bytes) };
         pkt.address.set_outbound(false);
         pkt.address.set_impostor(true);
@@ -500,8 +520,12 @@ fn main() -> Result<()> {
     tunnel.connect(relay)?;
     println!("隧道已连接中转节点 {relay}");
 
-    // WinDivert 网络层：截获出站 IPv4 UDP
-    let divert = match WinDivert::network("outbound and udp and ip", 0, WinDivertFlags::new()) {
+    // WinDivert 网络层：截获出站 IPv4 UDP（排除回环——反作弊/游戏本地通信不走隧道）
+    let divert = match WinDivert::network(
+        "outbound and udp and ip and ip.DstAddr != 127.0.0.1",
+        0,
+        WinDivertFlags::new(),
+    ) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("WinDivert 打开失败: {e}");
@@ -529,6 +553,7 @@ fn main() -> Result<()> {
         stats_dropped: AtomicU64::new(0),
         banner_shown: AtomicBool::new(false),
         probe_session: AtomicU32::new(0),
+        nonce_counter: AtomicU64::new(0),
     });
 
     // 后台线程：进程刷新、回包注入、保活、统计

@@ -2,11 +2,13 @@
 //!
 //! 用法: accelctl --relay 1.2.3.4:41000 --token xxx probe
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
-use protocol::{encode_open, parse, write_header, TYPE_DATA, TYPE_OPEN};
+use protocol::crypto;
+use protocol::{encode_open, parse, write_header, DIR_CLIENT, TYPE_DATA, TYPE_OPEN, TYPE_CLOSE};
 
 #[derive(Parser)]
 struct Args {
@@ -46,6 +48,33 @@ fn new_session() -> u32 {
     pid ^ nanos.rotate_left(16)
 }
 
+/// v2：构造加密隧道包（header 明文 + nonce + AEAD 载荷）
+async fn send_pkt(
+    sock: &tokio::net::UdpSocket,
+    token: &str,
+    kind: u8,
+    session: u32,
+    seq: u16,
+    payload: &[u8],
+    counter: &AtomicU64,
+) -> Result<()> {
+    let key = crypto::session_key(token, session);
+    let mut pkt = Vec::with_capacity(
+        protocol::HEADER_LEN + crypto::NONCE_LEN + payload.len() + crypto::TAG_LEN,
+    );
+    write_header(
+        &mut pkt,
+        kind,
+        session,
+        seq,
+        crypto::NONCE_LEN + payload.len() + crypto::TAG_LEN,
+    );
+    let c = counter.fetch_add(1, Ordering::Relaxed) + 1;
+    pkt.extend(crypto::encrypt(&key, &pkt[..protocol::HEADER_LEN], payload, DIR_CLIENT, c));
+    sock.send(&pkt).await?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -54,19 +83,17 @@ async fn main() -> Result<()> {
         interval_ms,
         size,
     } = args.cmd;
+    let counter = AtomicU64::new(0);
 
     let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
     sock.connect(&args.relay).await?;
-    println!("relay: {}", args.relay);
+    println!("relay: {} (encrypted v2)", args.relay);
 
     let session = new_session();
 
-    // 建立回显会话
+    // 建立回显会话（OPEN 加密，解密成功即完成认证）
     let open_payload = encode_open(&args.token, "echo");
-    let mut pkt = Vec::new();
-    write_header(&mut pkt, TYPE_OPEN, session, 0, open_payload.len());
-    pkt.extend_from_slice(&open_payload);
-    sock.send(&pkt).await?;
+    send_pkt(&sock, &args.token, TYPE_OPEN, session, 0, &open_payload, &counter).await;
 
     let mut rtts = Vec::new();
     let mut lost = 0u32;
@@ -79,10 +106,7 @@ async fn main() -> Result<()> {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         body[..8].copy_from_slice(&ts.to_le_bytes());
-        let mut req = Vec::with_capacity(protocol::HEADER_LEN + body.len());
-        write_header(&mut req, TYPE_DATA, session, i as u16, body.len());
-        req.extend_from_slice(&body);
-        sock.send(&req).await?;
+        send_pkt(&sock, &args.token, TYPE_DATA, session, i as u16, &body, &counter).await?;
 
         let start = Instant::now();
         let mut got = false;
@@ -92,10 +116,13 @@ async fn main() -> Result<()> {
             let remain = deadline - start.elapsed();
             match tokio::time::timeout(remain, sock.recv(&mut rbuf)).await {
                 Ok(Ok(len)) => {
-                    if let Some((hdr, _)) = parse(&rbuf[..len]) {
+                    if let Some((hdr, wire)) = parse(&rbuf[..len]) {
                         if hdr.kind == TYPE_DATA && hdr.seq == i as u16 {
-                            got = true;
-                            break;
+                            let key = crypto::session_key(&args.token, hdr.session);
+                            if crypto::decrypt(&key, &rbuf[..protocol::HEADER_LEN], wire).is_some() {
+                                got = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -115,9 +142,7 @@ async fn main() -> Result<()> {
     }
 
     // 关闭会话
-    let mut pkt = Vec::new();
-    write_header(&mut pkt, protocol::TYPE_CLOSE, session, 0, 0);
-    let _ = sock.send(&pkt).await;
+    send_pkt(&sock, &args.token, TYPE_CLOSE, session, 0, &[], &counter).await;
 
     println!("----");
     if rtts.is_empty() {

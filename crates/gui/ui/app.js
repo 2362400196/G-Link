@@ -22,11 +22,22 @@ function showToast(msg, err) {
   toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2200);
 }
 
+/* ---------- 智能选区：切到延迟最低的节点 ---------- */
+async function smartPick() {
+  const ok = nodes.filter((n) => n.lat != null);
+  if (!ok.length) { showToast("节点延迟探测中，请稍候再试", true); return; }
+  ok.sort((a, b) => a.lat - b.lat);
+  const best = ok[0];
+  if (best.id === selectedId) { showToast(`当前节点已是优选（${Math.round(best.lat)}ms）`); return; }
+  await selectNode(best.id);
+  showToast(`已智能选择「${best.name || best.addr}」· ${Math.round(best.lat)}ms`);
+}
+
 /* ---------- 侧边导航视图切换 ---------- */
 document.querySelectorAll(".nav-item").forEach((item) => {
   item.addEventListener("click", () => {
     const v = item.dataset.view;
-    if (v === "region") { showToast("智能选区开发中，敬请期待"); return; }
+    if (v === "region") { smartPick(); return; }   // 智能选区是动作，不切视图
     document.querySelectorAll(".nav-item").forEach((x) => x.classList.remove("active"));
     item.classList.add("active");
     $("viewHome").style.display = v === "home" ? "flex" : "none";
@@ -38,7 +49,7 @@ document.querySelectorAll(".nav-item").forEach((item) => {
 /* ---------- 配置：多节点 ---------- */
 const DEFAULT_PROC = "TslGame.exe";
 const DEFAULT_NODES = [
-  { id: 1, name: "默认节点", addr: "64.90.1.52:41000", token: "xawvnpyxj4t6bc67a3jysvdc" },
+  { id: 1, name: "中国香港 CN2", addr: "64.90.1.52:41000", token: "xawvnpyxj4t6bc67a3jysvdc" },
 ];
 const REGION_NAME = { kr: "韩国", jp: "日本", us: "美国", hk: "中国香港" };
 
@@ -63,7 +74,7 @@ function loadCfg() {
     const d = DEFAULT_NODES.find((x) => x.addr === n.addr);
     if (d) {
       if (!n.token) n.token = d.token;
-      if (!n.name || /^节点/.test(n.name)) n.name = d.name;
+      if (!n.name || n.name === "默认节点" || /^节点/.test(n.name)) n.name = d.name;
     }
   });
   const savedSel = +localStorage.getItem("pubg_accel_sel");
@@ -285,6 +296,7 @@ let probeFlags = [];  // 最近探测成败（丢包率）：1=通 0=超时
 let lastLat = null;
 let failStreak = 0;   // 选中节点连续探测失败次数
 let lastProbeOk = null; // 上一轮选中节点探测结果：true/false/null
+let autoSwitching = false; // 自动切换防重入
 
 async function probeLoop() {
   if (!nodes.length) return;
@@ -315,6 +327,19 @@ async function probeLoop() {
       else pushLog(`节点探测超时 → ${s.addr}（服务器无响应或链路丢包，丢包率统计中）`, "err");
       lastProbeOk = ok;
     }
+    // 节点故障自动切换：加速中当前节点连续 4 轮（约 10s）探测失败 → 切到最优备选
+    if (running && !ok && failStreak >= 4 && !autoSwitching) {
+      const okNodes = nodes.filter((n) => n.id !== s.id && n.lat != null);
+      if (okNodes.length) {
+        okNodes.sort((a, b) => a.lat - b.lat);
+        const best = okNodes[0];
+        autoSwitching = true;
+        pushLog(`节点 ${s.addr} 持续失联，自动切换至「${best.name || best.addr}」（${Math.round(best.lat)}ms）`, "err");
+        showToast("节点失联，已自动切换至最优节点", true);
+        await selectNode(best.id);
+        autoSwitching = false;
+      }
+    }
   }
   renderNodes();   // 统一在轮末刷新（延迟数字/下拉/游戏卡）
 }
@@ -342,6 +367,7 @@ function setLatency(ms) {
     else { trend.textContent = "—"; trend.className = "trend"; }
   }
   lastLat = ms;
+  renderSaved();
 }
 
 /* ---------- 顶栏网络状态 pill ---------- */
@@ -509,6 +535,29 @@ function handleLine(line) {
   }
   const m = line.match(/^\[latency\] (\d+)$/);
   if (m) setLatency(+m[1]);
+  // 从引擎会话日志提取游戏服务器 IP，用于直连延迟基准
+  const t = line.match(/tunnel session [0-9a-fx]+ -> ([0-9.]+):\d+/);
+  if (t) gameServerIp = t[1];
+}
+
+/* ---------- 加速前后延迟对比（状态栏「累计节省延迟」） ---------- */
+let gameServerIp = null;   // 当前隧道会话的游戏服务器 IP（引擎日志解析）
+let directLat = null;      // 直连游戏服务器的 ICMP 延迟
+function renderSaved() {
+  const el = $("savedMs");
+  if (!running || directLat == null || lastLat == null) { el.textContent = "—"; el.style.color = ""; return; }
+  const diff = Math.round(directLat - lastLat);
+  if (diff >= 0) { el.textContent = `↓ ${diff} ms`; el.style.color = "#10b981"; }
+  else { el.textContent = `↑ ${-diff} ms`; el.style.color = "#f59e0b"; }
+}
+async function directPingLoop() {
+  while (true) {
+    if (gameServerIp && running) {
+      try { directLat = await invoke("ping_direct", { ip: gameServerIp }); } catch { directLat = null; }
+      renderSaved();
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
 }
 
 /* ---------- 引擎管理 ---------- */
@@ -624,3 +673,4 @@ pushLog("就绪。启动游戏后点击「一键加速」。", "sys");
 invoke("engine_running").then((on) => { setRunning(on); if (on) startPolling(); }).catch(() => {});
 startPolling();
 probeLoop(); setInterval(probeLoop, 2500);   // 全节点延迟轮询
+directPingLoop();                            // 直连延迟基准（延迟对比）
