@@ -20,15 +20,18 @@ G-Link 是一款使用 Rust 编写的轻量级游戏加速器，采用「按进�
 ## 项目结构
 
 ```
-pubg/
+g-link/
 ├── crates/
-│   ├── protocol/       # 隧道协议定义（客户端 ↔ 中转节点）
+│   ├── protocol/       # 隧道协议定义（v2 加密，客户端 ↔ 中转节点）
 │   ├── relay-server/   # 中转节点服务端（部署在海外服务器）
 │   ├── accel-client/   # 加速引擎（WinDivert 截流 + 隧道）
 │   ├── accelctl/       # 链路探测调试工具
 │   └── gui/            # 桌面客户端（Tauri 2 + 原生前端）
-├── third_party/        # WinDivert 2.2.2 驱动（需自行放置）
-└── dist/               # 分发包输出目录
+│       └── ui/         # 前端页面（自研组件，无 UI 框架）
+├── bin/                # pubg-relay-linux 服务端预编译二进制（供一键脚本下载）
+├── install.sh          # 服务端一键安装/升级脚本
+├── game-booster-ui.html # 客户端 UI 设计稿
+└── third_party/        # WinDivert 2.2.2 驱动（构建时需自行放置，不入库）
 ```
 
 ## 普通用户：使用分发包
