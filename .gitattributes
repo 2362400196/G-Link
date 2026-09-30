@@ -1,0 +1,2 @@
+# 换行符策略：shell 脚本一律 LF（Linux 服务器上运行）
+*.sh text eol=lf

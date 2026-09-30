@@ -68,15 +68,26 @@ accelctl --relay <节点IP>:41000 --token <令牌> probe
 
 ## 服务端部署（中转节点）
 
-在海外服务器（Linux）上：
+**方式一：一键脚本（推荐）** —— 自动下载 `bin/pubg-relay-linux`、配置 systemd 常驻、开机自启、崩溃自动拉起：
 
 ```bash
+curl -fsSL https://gitee.com/zhuxiaohuaqn/g-link/raw/main/install.sh -o install.sh
+bash install.sh --token <你的令牌>
+```
+
+升级服务端时重复运行即可（不传 `--token` 则沿用已配置的令牌）。
+
+**方式二：手动部署** —— 下载 `bin/pubg-relay-linux` 后：
+
+```bash
+chmod +x pubg-relay-linux
+
 # 运行（token 必填，防止中转被滥用）
-./relay-server --bind 0.0.0.0:41000 --token <你的令牌>
+./pubg-relay-linux --bind 0.0.0.0:41000 --token <你的令牌>
 
 # 推荐 systemd 常驻，示例 /etc/systemd/system/pubg-relay.service：
 # [Service]
-# ExecStart=/opt/pubg-accel/relay-server --bind 0.0.0.0:41000 --token <你的令牌>
+# ExecStart=/opt/pubg-relay/pubg-relay-linux --bind 0.0.0.0:41000 --token <你的令牌>
 # Restart=always
 
 systemctl daemon-reload && systemctl enable --now pubg-relay
