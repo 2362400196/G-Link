@@ -1,141 +1,147 @@
-# G-Link 极速游戏加速器
+English | [简体中文](README.zh-CN.md)
 
-G-Link 是一款使用 Rust 编写的轻量级游戏加速器，采用「按进程精准分流」方案：只截流目标游戏（如 PUBG）的 UDP 流量并经中转节点转发，不注入、不修改游戏内存，不影响其他程序的网络。
+# G-Link Game Booster
+
+G-Link is a lightweight game accelerator written in Rust. It uses a **per-process traffic splitting** approach: only the UDP traffic of the target game (e.g. PUBG) is intercepted and forwarded through a relay node. It never injects into or touches game memory, and it does not affect any other program's network.
 
 ```
-┌─────────┐   UDP 隧道(加密令牌)   ┌──────────────┐   转发    ┌────────────┐
-│ 游戏进程 │ ←──────────────────→ │ 中转节点(海外) │ ←──────→ │ 游戏服务器  │
-└─────────┘    WinDivert 截流     └──────────────┘           └────────────┘
+┌───────────┐   UDP Tunnel (encrypted)   ┌──────────────┐  Forward   ┌───────────────┐
+│ Game proc │ ◄───────────────────────► │ Relay (abroad)│ ◄────────► │ Game server   │
+└───────────┘      WinDivert capture     └──────────────┘            └───────────────┘
 ```
 
-![G-Link 界面预览](docs/ui-preview.png)
+![G-Link UI Preview](docs/ui-preview.png)
 
-## 功能特性
+## Features
 
-- **按进程分流**：只接管目标进程（默认 `TslGame.exe`）的 UDP 流量，本地通信自动排除，下载、网页、语音不受影响
-- **多节点管理**：支持添加多个中转节点，点击切换；节点延迟每 2.5 秒自动探测
-- **智能选区**：一键切到当前延迟最低的节点
-- **故障自动切换**：加速中节点持续失联（约 10 秒）自动切到最优备选节点
-- **加密隧道**：v2 协议全包加密（ChaCha20-Poly1305），令牌与流量不落明文
-- **实时监控**：延迟、丢包率、实时速率、直连对比节省延迟一目了然
-- **节点热切换**：加速过程中切换节点无需重启游戏
-- **游戏库绑定**：点击游戏卡片自动绑定对应加速进程
-- **原生性能**：客户端引擎纯 Rust + WinDivert，中转节点 tokio 异步高并发
+- **Per-process splitting** — only the target process's UDP traffic (default `TslGame.exe`) is captured; loopback traffic is excluded automatically; downloads, browsing and voice chat stay untouched
+- **Multi-node management** — add multiple relay nodes and switch by click; latency is probed every 2.5 s
+- **Smart region select** — one click to switch to the lowest-latency node
+- **Automatic failover** — if the active node keeps timing out (~10 s) while accelerating, it auto-switches to the best available node
+- **Encrypted tunnel** — v2 protocol encrypts every packet with ChaCha20-Poly1305; token and traffic never travel in plaintext
+- **Real-time monitoring** — latency, packet loss, live throughput, and direct-connection latency comparison at a glance
+- **Hot node switching** — switch nodes mid-game without restarting the game
+- **Game library binding** — clicking a game card binds its process automatically
+- **Native performance** — pure Rust client engine + WinDivert; tokio-based async relay
 
-## 项目结构
+## Project Structure
 
 ```
 g-link/
 ├── crates/
-│   ├── protocol/       # 隧道协议定义（v2 加密，客户端 ↔ 中转节点）
-│   ├── relay-server/   # 中转节点服务端（部署在海外服务器）
-│   ├── accel-client/   # 加速引擎（WinDivert 截流 + 隧道）
-│   ├── accelctl/       # 链路探测调试工具
-│   └── gui/            # 桌面客户端（Tauri 2 + 原生前端）
-│       ├── ui/         # 前端页面（index.html / app.js / style.css / assets）
-│       └── icons/      # 应用图标
-├── bin/                # pubg-relay-linux 服务端预编译二进制（供一键脚本下载）
-└── install.sh          # 服务端一键安装/升级脚本
+│   ├── protocol/       # Tunnel protocol (v2 encryption, client ↔ relay)
+│   ├── relay-server/   # Relay node server (deployed on overseas servers)
+│   ├── accel-client/   # Acceleration engine (WinDivert capture + tunnel)
+│   ├── accelctl/       # Link probing / debugging tool
+│   └── gui/            # Desktop client (Tauri 2 + vanilla frontend)
+│       ├── ui/         # Frontend pages (index.html / app.js / style.css / assets)
+│       └── icons/      # App icons
+├── bin/                # Prebuilt pubg-relay-linux server binary (for install script)
+└── install.sh          # One-click server install / upgrade script
 ```
 
-> `third_party/`（WinDivert 2.2.2 驱动）、`dist/`（分发包输出）为本地目录，不入库。
+> `third_party/` (WinDivert 2.2.2 driver) and `dist/` (release package output) are local-only directories and are not committed.
 
-## 普通用户：使用分发包
+## For Users: Release Package
 
-1. 解压分发包（如 `G-Link-加速器.zip`）到任意目录，**保持所有文件在同一文件夹**
-2. 双击 `pubg-accel-gui.exe`，UAC 提示点「是」（加速引擎需要管理员权限）
-3. 在节点选择器中选择加速节点（默认已预置）
-4. 点击「一键加速」，然后启动游戏进对局即可
-5. 关闭窗口会自动停止加速
+1. Extract the release package (e.g. `G-Link.zip`) to any folder — **keep all files in the same folder**
+2. Double-click `pubg-accel-gui.exe` and click "Yes" on the UAC prompt (the engine needs admin rights)
+3. Pick a relay node in the node selector (a default node is preconfigured)
+4. Click "Accelerate", then start your game
+5. Closing the window automatically stops acceleration
 
-> 首次运行若提示缺少 WebView2，请安装微软官方离线包：https://go.microsoft.com/fwlink/p/?LinkId=2124703
+> If WebView2 is missing on first launch, install the official offline runtime: https://go.microsoft.com/fwlink/p/?LinkId=2124703
 
-## 开发者：从源码构建
+## For Developers: Build from Source
 
-环境要求：Windows 10+、Rust 1.75+、Node 不需要（前端静态资源直接打包）
+Requirements: Windows 10+, Rust 1.75+ (Node.js not needed — the frontend is bundled as static assets)
 
 ```powershell
-# 1. 放置 WinDivert 驱动
-#    下载 WinDivert-2.2.2-A 解压到 third_party/，
-#    .cargo/config.toml 已配置 WINDIVERT_PATH 指向 third_party/WinDivert-2.2.2-A/x64
+# 1. Place the WinDivert driver
+#    Download WinDivert-2.2.2-A and extract it into third_party/;
+#    .cargo/config.toml already sets WINDIVERT_PATH to third_party/WinDivert-2.2.2-A/x64
 
-# 2. 编译
+# 2. Build
 cargo build --release
 
-# 3. 产物
-#    target/release/pubg-accel-gui.exe                        桌面客户端
-#    target/release/accel-client.exe                          加速引擎（需与 WinDivert.dll / WinDivert64.sys 同目录）
-#    target/release/accelctl.exe                              链路探测工具
-#    target/release/pubg-relay.exe                            服务端（Windows 本地调试用）
-#    target/x86_64-unknown-linux-musl/release/pubg-relay      服务端（Linux 静态交叉编译，服务器部署用）
+# 3. Artifacts
+#    target/release/pubg-accel-gui.exe                        Desktop client
+#    target/release/accel-client.exe                          Engine (must sit next to WinDivert.dll / WinDivert64.sys)
+#    target/release/accelctl.exe                              Link probing tool
+#    target/release/pubg-relay.exe                            Relay server (Windows, for local debugging)
+#    target/x86_64-unknown-linux-musl/release/pubg-relay      Relay server (Linux static cross-build, for deployment)
 ```
 
-调试链路是否通畅：
+Verify the link works:
 
 ```powershell
-accelctl --relay <节点IP>:41000 --token <令牌> probe
+accelctl --relay <node-ip>:41000 --token <token> probe
 ```
 
-## 服务端部署（中转节点）
+## Server Deployment (Relay Node)
 
-**方式一：一键脚本（推荐）** —— 自动下载 `bin/pubg-relay-linux`、配置 systemd 常驻、开机自启、崩溃自动拉起：
+**Option 1: one-click script (recommended)** — downloads `bin/pubg-relay-linux`, sets up systemd, enables auto-start on boot and auto-restart on crash:
 
 ```bash
-curl -fsSL https://gitee.com/zhuxiaohuaqn/g-link/raw/main/install.sh -o install.sh
-bash install.sh --token <你的令牌>
+# GitHub
+curl -fsSL https://raw.githubusercontent.com/2362400196/G-Link/main/install.sh -o install.sh
+# Gitee mirror (mainland China)
+# curl -fsSL https://gitee.com/zhuxiaohuaqn/g-link/raw/main/install.sh -o install.sh
+
+bash install.sh --token <your-token>
 ```
 
-升级服务端时重复运行即可（不传 `--token` 则沿用已配置的令牌）。
+To upgrade later, just run the script again (omit `--token` to keep the configured token).
 
-**方式二：手动部署** —— 下载 `bin/pubg-relay-linux` 后：
+**Option 2: manual deployment** — download `bin/pubg-relay-linux`, then:
 
 ```bash
 chmod +x pubg-relay-linux
 
-# 运行（token 必填，防止中转被滥用）
-./pubg-relay-linux --bind 0.0.0.0:41000 --token <你的令牌>
+# Run it (token is required to prevent relay abuse)
+./pubg-relay-linux --bind 0.0.0.0:41000 --token <your-token>
 
-# 推荐 systemd 常驻，示例 /etc/systemd/system/pubg-relay.service：
+# systemd is recommended — example /etc/systemd/system/pubg-relay.service:
 # [Service]
-# ExecStart=/opt/pubg-relay/pubg-relay-linux --bind 0.0.0.0:41000 --token <你的令牌>
+# ExecStart=/opt/pubg-relay/pubg-relay-linux --bind 0.0.0.0:41000 --token <your-token>
 # Restart=always
 
 systemctl daemon-reload && systemctl enable --now pubg-relay
 
-# 防火墙放行 UDP 41000
+# Allow UDP 41000 in the firewall
 ufw allow 41000/udp
 ```
 
-## 客户端接入自建节点
+## Connecting Your Own Node (Client)
 
-界面左侧「设置」→「＋ 添加节点」：
+In the app: sidebar "Settings" → "＋ Add node":
 
-| 字段 | 说明 |
+| Field | Description |
 |---|---|
-| 节点名称 | 随意起名，含地区关键词可自动识别国旗（如"韩国·首尔"） |
-| 节点地址 | `IP:端口`，默认端口 41000 |
-| 国家图标 | 自动识别或手动指定 |
-| 访问令牌 | 与服务端 `--token` 一致 |
+| Node name | Anything; region keywords auto-detect the flag icon (e.g. "Korea · Seoul") |
+| Node address | `IP:port` (default port 41000) |
+| Country icon | Auto-detected, or pick manually |
+| Access token | Must match the server's `--token` |
 
-## 常见问题
+## FAQ
 
-| 问题 | 解决 |
+| Problem | Fix |
 |---|---|
-| 双击无反应 / 被杀毒拦截 | 未签名程序，选择「仍要运行」或加入白名单 |
-| 找不到 WebView2Loader.dll | 确认分发包所有文件在同一文件夹 |
-| 界面空白 | 安装 WebView2 Runtime（见上方链接） |
-| 延迟显示 `--` | 节点不可达，检查服务端是否运行、UDP 41000 是否放行 |
-| 延迟有数值但游戏没提速 | 确认加速进程名与游戏实际进程一致（默认 TslGame.exe） |
+| No reaction on double-click / blocked by antivirus | Unsigned binary — choose "Run anyway" or whitelist it |
+| WebView2Loader.dll not found | Make sure all package files stay in the same folder |
+| Blank window | Install the WebView2 Runtime (link above) |
+| Latency shows `--` | Node unreachable — check the server is running and UDP 41000 is open |
+| Latency shows but game is not boosted | Make sure the process name matches the game (default `TslGame.exe`) |
 
-## 技术细节
+## Technical Details
 
-- 协议（v2 加密）：`header(12, 明文) | nonce(12) | AEAD 密文(载荷 + 16B tag)`
-  - header：`magic(2) | ver(1) | type(1) | session(4) | seq(2) | payload_len(2)`
-  - type：OPEN（令牌+目标地址认证建会话）/ DATA / KEEPALIVE / CLOSE
-  - 加密：ChaCha20-Poly1305，密钥按会话派生，nonce 含方向前缀 + 全局计数器（永不重用），AAD 为明文 header
-- 加速原理：WinDivert 网络层截流出站 UDP（过滤回环 127.0.0.1）→ 查询系统 UDP 连接表按端口归属进程判定 → 命中目标进程的包进隧道，其余放行
-- 安全红线：不注入 DLL、不读写游戏内存，兼容 BattlEye 反作弊
+- Protocol (v2 encrypted): `header(12, plaintext) | nonce(12) | AEAD ciphertext(payload + 16B tag)`
+  - Header: `magic(2) | ver(1) | type(1) | session(4) | seq(2) | payload_len(2)`
+  - Types: OPEN (token + target authentication) / DATA / KEEPALIVE / CLOSE
+  - Encryption: ChaCha20-Poly1305 with per-session keys; the nonce carries a direction prefix + global counter (never reused); plaintext header is used as AAD
+- How acceleration works: WinDivert captures outbound UDP at the network layer (loopback 127.0.0.1 excluded) → the owning process is resolved via the OS UDP connection table → packets of the target process enter the tunnel, everything else passes through
+- Safety: no DLL injection, no game memory access — compatible with BattlEye anti-cheat
 
-## 许可
+## License
 
-仅供学习研究使用，请遵守当地法律法规。
+For learning and research purposes only. Please comply with your local laws and regulations.
