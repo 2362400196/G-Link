@@ -284,6 +284,7 @@ svg.ic{flex-shrink:0}
 .stat-card .s-label{font-size:11px;color:var(--text-low2);margin-bottom:4px;display:flex;align-items:baseline;gap:8px;white-space:nowrap}
 .stat-card .s-value{font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 .stat-card .s-value small{font-size:11px;font-weight:400;color:var(--text-mid);margin-left:3px}
+.stat-card .s-est{font-size:11px;color:var(--text-low2);margin-top:2px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .v-good{color:var(--accent)}
 .v-mid{color:var(--orange-deep)}
 .v-bad{color:var(--red)}

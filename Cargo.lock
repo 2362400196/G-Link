@@ -2713,6 +2713,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "window-vibrancy 0.5.3",
+ "windows 0.62.2",
 ]
 
 [[package]]

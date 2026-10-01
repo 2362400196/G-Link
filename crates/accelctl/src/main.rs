@@ -15,8 +15,8 @@ struct Args {
     /// 中转节点地址 ip:port
     #[arg(long)]
     relay: String,
-    /// 接入令牌
-    #[arg(long, default_value = "changeme")]
+    /// 接入令牌（也可用环境变量 GLINK_TOKEN）
+    #[arg(long, default_value = "changeme", env = "GLINK_TOKEN")]
     token: String,
 
     #[command(subcommand)]
@@ -36,6 +36,10 @@ enum Cmd {
         /// 载荷大小（字节）
         #[arg(long, default_value_t = 64)]
         size: usize,
+        /// 指定 ip:port 时测量「中转 → 该目标」的 RTT（中转 ICMP 探测，经 INFO 回报），
+        /// 而不是默认的回显 RTT；用于验证某节点到某游戏服务器的第二跳延迟
+        #[arg(long)]
+        target: Option<String>,
     },
 }
 
@@ -82,6 +86,7 @@ async fn main() -> Result<()> {
         count,
         interval_ms,
         size,
+        target,
     } = args.cmd;
     let counter = AtomicU64::new(0);
 
@@ -90,6 +95,43 @@ async fn main() -> Result<()> {
     println!("relay: {} (encrypted v2)", args.relay);
 
     let session = new_session();
+    let mut rbuf = vec![0u8; 4096];
+
+    // --target 模式：OPEN 到真实目标，等中转的 TYPE_INFO 回报 leg2 RTT
+    if let Some(tgt) = target {
+        let open_payload = encode_open(&args.token, &tgt);
+        send_pkt(&sock, &args.token, TYPE_OPEN, session, 0, &open_payload, &counter).await?;
+        let start = Instant::now();
+        let deadline = Duration::from_secs(4);
+        let mut leg2 = None;
+        while start.elapsed() < deadline {
+            let remain = deadline - start.elapsed();
+            match tokio::time::timeout(remain, sock.recv(&mut rbuf)).await {
+                Ok(Ok(len)) => {
+                    if let Some((hdr, wire)) = parse(&rbuf[..len]) {
+                        if hdr.kind == protocol::TYPE_INFO && hdr.session == session {
+                            let key = crypto::session_key(&args.token, hdr.session);
+                            if let Some(p) =
+                                crypto::decrypt(&key, &rbuf[..protocol::HEADER_LEN], wire)
+                            {
+                                if p.len() >= 4 {
+                                    leg2 = Some(u32::from_le_bytes(p[..4].try_into().unwrap()));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+        send_pkt(&sock, &args.token, TYPE_CLOSE, session, 0, &[], &counter).await;
+        match leg2 {
+            Some(ms) => println!("leg2（中转 → {tgt}）RTT: {ms} ms"),
+            None => bail!("未收到 leg2 回报（服务端版本过旧、目标禁 ICMP 或链路不通）"),
+        }
+        return Ok(());
+    }
 
     // 建立回显会话（OPEN 加密，解密成功即完成认证）
     let open_payload = encode_open(&args.token, "echo");

@@ -352,6 +352,7 @@ function setLatency(ms) {
     nodePing.textContent = "--"; nodePing.className = "ns-ping";
     trend.textContent = "—"; trend.className = "trend";
     lastLat = null;
+    clearEstimate();
     updateNetPill(null);
     return;
   }
@@ -368,6 +369,21 @@ function setLatency(ms) {
   }
   lastLat = ms;
   renderSaved();
+}
+
+/* ---------- 游戏内延迟估算（引擎经中转实测回报） ---------- */
+let estLat = null;
+function setEstimate(ms) {
+  estLat = ms;
+  const el = $("pingEst");
+  el.textContent = "游戏内 ≈ " + ms + " ms";
+  el.style.color = ms < 100 ? "var(--accent)" : ms < 150 ? "var(--orange-deep)" : "var(--red)";
+}
+function clearEstimate() {
+  estLat = null;
+  const el = $("pingEst");
+  el.textContent = "游戏内 ≈ --";
+  el.style.color = "";
 }
 
 /* ---------- 顶栏网络状态 pill ---------- */
@@ -435,7 +451,8 @@ function renderGames() {
   const grid = $("gameGrid");
   grid.innerHTML = "";
   const s = selNode();
-  const ping = s && s.lat != null ? Math.round(s.lat) : null;
+  // 游戏卡延迟优先显示引擎实测的「游戏内估算」，其次退回节点延迟
+  const ping = estLat ?? (s && s.lat != null ? Math.round(s.lat) : null);
   const curGame = localStorage.getItem("pubg_accel_game") || "绝地求生";
   // 绝地求生（内置）
   const card = document.createElement("div");
@@ -615,7 +632,7 @@ const logEl = $("log");
 const logLines = [];
 let logFilter = "all";
 function classify(line) {
-  if (/^\[latency\] \d+$/.test(line)) return "latency";
+  if (/^\[latency\] \d+$/.test(line) || /^\[estimate\] \d+$/.test(line)) return "latency";
   if (/error|失败|Error|ERROR|拒绝|无法|denied|auth failed/i.test(line)) return "err";
   if (/\[加速成功\]|\[检测\]|session.*opened|replaced/i.test(line)) return "session";
   if (/^\[stats\]/.test(line)) return "stat";
@@ -669,6 +686,9 @@ function handleLine(line) {
   }
   const m = line.match(/^\[latency\] (\d+)$/);
   if (m) setLatency(+m[1]);
+  // 引擎回报的游戏内延迟估算（节点延迟 + 节点→服务器延迟）
+  const est = line.match(/^\[estimate\] (\d+)$/);
+  if (est) setEstimate(+est[1]);
   // 从引擎会话日志提取游戏服务器 IP，用于直连延迟基准
   const t = line.match(/tunnel session [0-9a-fx]+ -> ([0-9.]+):\d+/);
   if (t) gameServerIp = t[1];
@@ -679,8 +699,10 @@ let gameServerIp = null;   // 当前隧道会话的游戏服务器 IP（引擎�
 let directLat = null;      // 直连游戏服务器的 ICMP 延迟
 function renderSaved() {
   const el = $("savedMs");
-  if (!running || directLat == null || lastLat == null) { el.textContent = "—"; el.style.color = ""; return; }
-  const diff = Math.round(directLat - lastLat);
+  // 节省延迟 = 直连 ICMP RTT − 游戏内端到端估算（无估算时退回节点延迟）
+  const eff = estLat ?? lastLat;
+  if (!running || directLat == null || eff == null) { el.textContent = "—"; el.style.color = ""; return; }
+  const diff = Math.round(directLat - eff);
   if (diff >= 0) { el.textContent = `↓ ${diff} ms`; el.style.color = "#10b981"; }
   else { el.textContent = `↑ ${-diff} ms`; el.style.color = "#f59e0b"; }
 }
@@ -708,6 +730,7 @@ function setRunning(on) {
     lastTun = { v: 0, t: 0 };
     $("speedVal").innerHTML = "— <small>pps</small>";
     ["stTun", "stRe", "stPass", "stSess"].forEach((id) => ($(id).textContent = "0"));
+    clearEstimate();
   }
 }
 
@@ -758,6 +781,7 @@ function startPolling() {
   }, 700);
 }
 listen("engine-log", (ev) => handleLine(String(ev.payload)));
+listen("engine-estimate", (ev) => setEstimate(+ev.payload));
 listen("engine-exited", (ev) => {
   pushLog(`引擎已退出（code ${ev.payload}）`, "sys");
   setRunning(false);

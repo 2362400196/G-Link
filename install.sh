@@ -34,9 +34,14 @@ done
 [ "$(id -u)" -eq 0 ] || err "请用 root 运行：sudo bash install.sh ..."
 
 # ---- 令牌：未传参且已安装过则沿用原令牌（升级场景） ----
+if [ -z "$TOKEN" ] && [ -f "$BIN_DIR/token.env" ]; then
+  TOKEN=$(grep -oP '(?<=^GLINK_TOKEN=).+' "$BIN_DIR/token.env" 2>/dev/null | head -1 || true)
+  [ -n "$TOKEN" ] && log "检测到已配置的令牌文件，沿用原令牌"
+fi
 if [ -z "$TOKEN" ] && [ -f "/etc/systemd/system/$SERVICE.service" ]; then
+  # 兼容旧版（令牌写在 ExecStart 命令行上的安装）
   TOKEN=$(grep -oP '(?<=--token )\S+' "/etc/systemd/system/$SERVICE.service" 2>/dev/null || true)
-  [ -n "$TOKEN" ] && log "检测到已安装服务，沿用原令牌"
+  [ -n "$TOKEN" ] && log "从旧版服务配置迁移令牌"
 fi
 [ -n "$TOKEN" ] || err "缺少令牌：bash install.sh --token 你的令牌"
 
@@ -65,6 +70,10 @@ systemctl stop "$SERVICE" 2>/dev/null || true
 mv -f "$TMP" "$BIN_PATH"
 log "二进制已就位: $BIN_PATH"
 
+# ---- 令牌落盘（0600，systemd 经 EnvironmentFile 注入，不出现在命令行/进程列表） ----
+printf 'GLINK_TOKEN=%s\n' "$TOKEN" > "$BIN_DIR/token.env"
+chmod 600 "$BIN_DIR/token.env"
+
 # ---- 生成 systemd 服务 ----
 cat > "/etc/systemd/system/$SERVICE.service" <<EOF
 [Unit]
@@ -72,7 +81,8 @@ Description=G-Link relay server (UDP tunnel v2)
 After=network.target
 
 [Service]
-ExecStart=$BIN_PATH --bind 0.0.0.0:$PORT --token $TOKEN
+EnvironmentFile=$BIN_DIR/token.env
+ExecStart=$BIN_PATH --bind 0.0.0.0:$PORT
 Restart=always
 RestartSec=3
 NoNewPrivileges=true

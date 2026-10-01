@@ -16,9 +16,10 @@ G-Link 是一款使用 Rust 编写的轻量级游戏加速器，采用「按进�
 
 - **按进程分流**：只接管目标进程（默认 `TslGame.exe`）的 UDP 流量，本地通信自动排除，下载、网页、语音不受影响
 - **多节点管理**：支持添加多个中转节点，点击切换；节点延迟每 2.5 秒自动探测
+- **游戏内延迟估算**：中转节点实测自己到游戏服务器的延迟并回报，界面同时展示「到节点延迟」与「游戏内延迟 ≈ 节点延迟 + 节点→服务器」
 - **智能选区**：一键切到当前延迟最低的节点
 - **故障自动切换**：加速中节点持续失联（约 10 秒）自动切到最优备选节点
-- **加密隧道**：v2 协议全包加密（ChaCha20-Poly1305），令牌与流量不落明文
+- **加密隧道**：v2 协议全包加密（ChaCha20-Poly1305），令牌与流量不落明文，附重放防护
 - **实时监控**：延迟、丢包率、实时速率、直连对比节省延迟一目了然
 - **节点热切换**：加速过程中切换节点无需重启游戏
 - **游戏库绑定**：点击游戏卡片自动绑定对应加速进程
@@ -75,7 +76,11 @@ cargo build --release
 调试链路是否通畅：
 
 ```powershell
+# 测「你 ↔ 中转节点」往返延迟与丢包
 accelctl --relay <节点IP>:41000 --token <令牌> probe
+
+# 测「中转节点 → 游戏服务器」的第二跳延迟（游戏内延迟 ≈ 上一条 + 这个值）
+accelctl --relay <节点IP>:41000 --token <令牌> probe --target <游戏服务器IP>:端口
 ```
 
 ## 服务端部署（中转节点）
@@ -91,19 +96,24 @@ curl -fsSL https://raw.githubusercontent.com/2362400196/G-Link/main/install.sh -
 bash install.sh --token <你的令牌>
 ```
 
-升级服务端时重复运行即可（不传 `--token` 则沿用已配置的令牌）。
+升级服务端时重复运行即可（不传 `--token` 则沿用已配置的令牌）。令牌保存在 `/opt/pubg-relay/token.env`（权限 600），由 systemd `EnvironmentFile` 注入，不会出现在进程命令行。
 
 **方式二：手动部署** —— 下载 `bin/pubg-relay-linux` 后：
 
 ```bash
 chmod +x pubg-relay-linux
 
-# 运行（token 必填，防止中转被滥用）
-./pubg-relay-linux --bind 0.0.0.0:41000 --token <你的令牌>
+# 运行（token 必填，防止中转被滥用；推荐用环境变量，避免令牌出现在进程列表）
+export GLINK_TOKEN=<你的令牌>
+./pubg-relay-linux --bind 0.0.0.0:41000
+
+# 可选：限制可中转的目标网段（如 PUBG 服务器段），防止中转被当作开放 UDP 中继
+# ./pubg-relay-linux --bind 0.0.0.0:41000 --allow-target 45.121.0.0/16 --allow-target 43.131.0.0/16
 
 # 推荐 systemd 常驻，示例 /etc/systemd/system/pubg-relay.service：
 # [Service]
-# ExecStart=/opt/pubg-relay/pubg-relay-linux --bind 0.0.0.0:41000 --token <你的令牌>
+# EnvironmentFile=/opt/pubg-relay/token.env        # 内容：GLINK_TOKEN=你的令牌（chmod 600）
+# ExecStart=/opt/pubg-relay/pubg-relay-linux --bind 0.0.0.0:41000
 # Restart=always
 
 systemctl daemon-reload && systemctl enable --now pubg-relay
@@ -131,16 +141,19 @@ ufw allow 41000/udp
 | 找不到 WebView2Loader.dll | 确认分发包所有文件在同一文件夹 |
 | 界面空白 | 安装 WebView2 Runtime（见上方链接） |
 | 延迟显示 `--` | 节点不可达，检查服务端是否运行、UDP 41000 是否放行 |
+| 「节点延迟」与游戏内 ping 不同 | 两者含义不同：界面主数字是「你 ↔ 中转节点」的往返延迟；游戏内还包含「中转 ↔ 游戏服务器」一跳。加速后界面会显示「游戏内 ≈ X ms」的实测估算，以此为准 |
 | 延迟有数值但游戏没提速 | 确认加速进程名与游戏实际进程一致（默认 TslGame.exe） |
 
 ## 技术细节
 
 - 协议（v2 加密）：`header(12, 明文) | nonce(12) | AEAD 密文(载荷 + 16B tag)`
   - header：`magic(2) | ver(1) | type(1) | session(4) | seq(2) | payload_len(2)`
-  - type：OPEN（令牌+目标地址认证建会话）/ DATA / KEEPALIVE / CLOSE
+  - type：OPEN（令牌+目标地址认证建会话）/ DATA / KEEPALIVE / CLOSE / INFO（中转回报 leg2 延迟）
   - 加密：ChaCha20-Poly1305，密钥按会话派生，nonce 含方向前缀 + 全局计数器（永不重用），AAD 为明文 header
+  - 重放防护：收发双方各维护每会话 64 计数器滑动窗口，重复或过旧的计数器直接丢弃；nonce 方向字节校验拦截跨方向回灌
+- 延迟估算：中转节点对 OPEN 的目标 IP 发一次 ICMP 探测（缓存 60 秒），把「中转 ↔ 游戏服务器」RTT 经 INFO 包回报；客户端显示「游戏内 ≈ 隧道RTT + leg2」。游戏服务器禁 ping 时无估算值，界面退回显示节点延迟
 - 加速原理：WinDivert 网络层截流出站 UDP（过滤回环 127.0.0.1）→ 查询系统 UDP 连接表按端口归属进程判定 → 命中目标进程的包进隧道，其余放行
-- 安全红线：不注入 DLL、不读写游戏内存，兼容 BattlEye 反作弊
+- 安全红线：不注入 DLL、不读写游戏内存，兼容 BattlEye 反作弊；服务端目标仅接受 IPv4 字面量（不做 DNS），支持 `--allow-target` 网段白名单；令牌推荐走 `GLINK_TOKEN` 环境变量而非命令行
 
 ## 许可
 

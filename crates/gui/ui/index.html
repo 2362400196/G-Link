@@ -171,7 +171,7 @@
                       <div class="ns-label">加速节点</div>
                       <div class="ns-value" id="nodeRegion">--</div>
                     </div>
-                    <div class="ns-ping" id="nodePing">--</div>
+                    <div class="ns-ping" id="nodePing" title="到中转节点的往返延迟">--</div>
                     <div class="arrow" id="nodeArrow">▼</div>
                   </div>
                 </div>
@@ -204,8 +204,9 @@
             <div class="hero-stats">
               <div class="stat-card s-wide">
                 <div class="s-main">
-                  <div class="s-label"><span>延迟 PING</span><span class="trend" id="pingTrend">—</span></div>
+                  <div class="s-label"><span>节点延迟（到中转）</span><span class="trend" id="pingTrend">—</span></div>
                   <div class="s-value" id="pingVal">— <small>ms</small></div>
+                  <div class="s-est" id="pingEst" title="估算 = 到节点延迟 + 节点到游戏服务器延迟，加速后由引擎实测回报">游戏内 ≈ --</div>
                 </div>
                 <svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none">
                   <defs>

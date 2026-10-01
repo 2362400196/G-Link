@@ -34,16 +34,16 @@ fn push_log_by_arc(q: &Arc<Mutex<VecDeque<String>>>, line: String) {
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// 写探针文件检测管理员权限（零依赖）
+/// 检测管理员权限（WinDivert 需要，走 Win32 IsUserAnAdmin）
+#[cfg(target_os = "windows")]
 fn is_elevated() -> bool {
-    let probe = std::path::Path::new(r"C:\Windows\.pubg_accel_admin_probe");
-    match std::fs::write(probe, b"ok") {
-        Ok(_) => {
-            let _ = std::fs::remove_file(probe);
-            true
-        }
-        Err(_) => false,
-    }
+    use windows::Win32::UI::Shell::IsUserAnAdmin;
+    unsafe { IsUserAnAdmin().as_bool() }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_elevated() -> bool {
+    true
 }
 
 fn relaunch_elevated() {
@@ -117,7 +117,9 @@ fn start_engine(
         return Err(format!("未找到引擎程序: {}", exe.display()));
     }
     let mut child = Command::new(&exe)
-        .args(["--relay", &relay, "--token", &token, "--process", &process])
+        .args(["--relay", &relay, "--process", &process])
+        // 令牌经环境变量传递，不落在进程命令行上（进程列表可见）
+        .env("GLINK_TOKEN", &token)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .creation_flags(CREATE_NO_WINDOW)
@@ -139,6 +141,13 @@ fn start_engine(
         std::thread::spawn(move || {
             for line in BufReader::new(stream).lines() {
                 let Ok(line) = line else { break };
+                // 引擎的「游戏内延迟估算」行（[estimate] N）单独推事件，供仪表盘展示
+                if let Some(ms) = line
+                    .strip_prefix("[estimate] ")
+                    .and_then(|s| s.trim().parse::<u32>().ok())
+                {
+                    let _ = app2.emit("engine-estimate", ms);
+                }
                 push_log_by_arc(&logs2, line.clone());
                 let _ = app2.emit("engine-log", line);
             }
@@ -288,16 +297,31 @@ fn ping_direct(ip: String) -> Option<f64> {
         .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
-    let s = String::from_utf8_lossy(&out.stdout);
-    // 中文系统："时间=52ms"；英文："time=52ms"
-    for key in ["时间=", "time="] {
-        if let Some(i) = s.find(key) {
-            let rest = &s[i + key.len()..];
-            let num: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if let Ok(v) = num.parse::<f64>() {
-                return Some(v);
-            }
+    parse_ping_ms(&String::from_utf8_lossy(&out.stdout)).map(|ms| ms as f64)
+}
+
+/// 与 relay-server 同款的本地化无关解析：中文 Windows 的 ping 输出是 GBK，
+/// "时间=" 经 UTF-8 转换即乱码，故找不被翻译的 `ttl=` 回复行、从 `ms` 前取数字。
+fn parse_ping_ms(s: &str) -> Option<u32> {
+    for line in s.lines() {
+        let lower = line.to_ascii_lowercase();
+        if !lower.contains("ttl=") {
+            continue;
         }
+        let ms_idx = lower.find("ms")?;
+        let bytes = line.as_bytes();
+        let mut end = ms_idx;
+        while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+            end -= 1;
+        }
+        let mut start = end;
+        while start > 0 && (bytes[start - 1].is_ascii_digit() || bytes[start - 1] == b'.') {
+            start -= 1;
+        }
+        if start == end {
+            continue;
+        }
+        return line[start..end].parse::<f64>().ok().map(|v| v.round() as u32);
     }
     None
 }

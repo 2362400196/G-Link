@@ -17,7 +17,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use protocol::crypto;
-use protocol::{encode_open, parse, write_header, DIR_CLIENT, TYPE_DATA, TYPE_KEEPALIVE, TYPE_OPEN};
+use protocol::ReplayGuard;
+use protocol::{
+    encode_open, parse, write_header, DIR_CLIENT, DIR_RELAY, TYPE_DATA, TYPE_INFO, TYPE_KEEPALIVE,
+    TYPE_OPEN,
+};
 use windivert::address::WinDivertAddress;
 use windivert::prelude::*;
 use windivert::WinDivert;
@@ -31,8 +35,8 @@ struct Args {
     /// 中转节点地址 ip:port
     #[arg(long)]
     relay: String,
-    /// 接入令牌
-    #[arg(long)]
+    /// 接入令牌（也可用环境变量 GLINK_TOKEN）
+    #[arg(long, env = "GLINK_TOKEN")]
     token: String,
     /// 要加速的进程名（可多次指定）
     #[arg(long = "process", default_value = "TslGame.exe")]
@@ -109,17 +113,15 @@ struct Shared {
     banner_shown: AtomicBool,
     /// 延迟探针会话（0 = 未建立；回包不注入，用于测隧道 RTT）
     probe_session: AtomicU32,
+    /// leg2：中转 ↔ 游戏服务器 RTT（毫秒，0 = 未知；来自中转 TYPE_INFO 回报）
+    leg2_ms: AtomicU32,
     /// 发往中转方向的 nonce 计数器（全局递增）
     nonce_counter: AtomicU64,
+    /// 中转→客户端方向的重放窗口（按会话）
+    replay: Mutex<HashMap<u32, ReplayGuard>>,
 }
 
 impl Shared {
-    fn new_session(&self) -> u32 {
-        let mut book = self.book.lock().unwrap();
-        book.next_id = book.next_id.wrapping_add(1);
-        book.next_id
-    }
-
     /// 取会话；新流则登记并返回 true（调用方需补发 OPEN）
     fn get_or_create(&self, key: FlowKey, src_ip: Ipv4Addr, if_idx: u32, sub_if_idx: u32) -> (u32, bool) {
         let mut book = self.book.lock().unwrap();
@@ -158,6 +160,16 @@ impl Shared {
         } else {
             0
         }
+    }
+
+    /// 中转→客户端方向的重放检查（按会话滑动窗口）
+    fn check_replay(&self, session: u32, counter: u64) -> bool {
+        self.replay
+            .lock()
+            .unwrap()
+            .entry(session)
+            .or_default()
+            .check(counter)
     }
 
     /// 端口是否属于目标进程。先查缓存，未命中则实时查 UDP 连接表归属。
@@ -397,12 +409,17 @@ fn reply_loop(shared: Arc<Shared>) -> Result<()> {
             }
         };
         let Some((hdr, wire)) = parse(&rbuf[..len]) else { continue };
-        if hdr.kind != TYPE_DATA { continue; }
         // v2：解密回包（失败 = 令牌不符或包损坏，丢弃）
         let key = crypto::session_key(&shared.token, hdr.session);
         let Some(payload) = crypto::decrypt(&key, &rbuf[..protocol::HEADER_LEN], wire) else {
             continue;
         };
+        // 方向校验：中转方向的包 nonce 前缀必须是 DIR_RELAY，
+        // 同时挡住把本机上行包原样回灌（跨方向重放）的包
+        if wire.len() < crypto::NONCE_LEN || wire[0] != DIR_RELAY {
+            continue;
+        }
+        let counter = crypto::counter_from_nonce(wire);
 
         // 延迟探针回包：不注入协议栈，仅计算 RTT
         let probe = shared.probe_session.load(Ordering::Relaxed);
@@ -410,9 +427,33 @@ fn reply_loop(shared: Arc<Shared>) -> Result<()> {
             if payload.len() >= 8 {
                 let sent = u64::from_le_bytes(payload[..8].try_into().unwrap());
                 let rtt = nanos().saturating_sub(sent);
-                println!("[latency] {}", rtt / 1_000_000);
+                let ms = rtt / 1_000_000;
+                println!("[latency] {ms}");
+                // 游戏内端到端估算 = 隧道 RTT（本机↔中转）+ leg2（中转↔游戏服务器）
+                let leg2 = shared.leg2_ms.load(Ordering::Relaxed);
+                if leg2 > 0 {
+                    println!("[estimate] {}", ms + leg2 as u64);
+                }
             }
             continue;
+        }
+
+        // 中转链路信息回报：leg2 = 中转 ↔ 游戏服务器 RTT
+        if hdr.kind == TYPE_INFO {
+            if payload.len() >= 4 {
+                let ms = u32::from_le_bytes(payload[..4].try_into().unwrap());
+                if shared.leg2_ms.swap(ms, Ordering::Relaxed) != ms {
+                    println!("[leg2] 中转↔游戏服务器 RTT ≈ {ms} ms（游戏内延迟 ≈ 节点延迟 + {ms}ms）");
+                }
+            }
+            continue;
+        }
+        if hdr.kind != TYPE_DATA { continue; }
+
+        // 重放防护：已见过的 nonce 计数器直接丢弃
+        match counter {
+            Some(c) if shared.check_replay(hdr.session, c) => {}
+            _ => continue,
         }
 
         let key = { shared.book.lock().unwrap().by_id.get(&hdr.session).copied() };
@@ -456,7 +497,7 @@ fn ip_id_get() -> u16 { IP_ID.load(Ordering::Relaxed) as u16 }
 fn keepalive_loop(shared: Arc<Shared>) {
     loop {
         std::thread::sleep(Duration::from_secs(15));
-        let ids: Vec<u32> = {
+        let (ids, expired_ids): (Vec<u32>, Vec<u32>) = {
             let mut book = shared.book.lock().unwrap();
             let now = Instant::now();
             let expired: Vec<FlowKey> = book
@@ -465,13 +506,18 @@ fn keepalive_loop(shared: Arc<Shared>) {
                 .filter(|(_, (_, rec))| now.duration_since(rec.last_seen) > Duration::from_secs(180))
                 .map(|(k, _)| *k)
                 .collect();
+            let mut expired_ids = Vec::new();
             for k in &expired {
                 if let Some((id, _)) = book.by_key.remove(k) {
                     book.by_id.remove(&id);
+                    expired_ids.push(id);
                 }
             }
-            book.by_key.values().map(|(id, _)| *id).collect()
+            (book.by_key.values().map(|(id, _)| *id).collect(), expired_ids)
         };
+        for id in expired_ids {
+            shared.replay.lock().unwrap().remove(&id);
+        }
         for id in ids {
             // 载荷放时间戳：包内容唯一，规避链路反重放
             let mut payload = [0u8; 8];
@@ -553,7 +599,9 @@ fn main() -> Result<()> {
         stats_dropped: AtomicU64::new(0),
         banner_shown: AtomicBool::new(false),
         probe_session: AtomicU32::new(0),
+        leg2_ms: AtomicU32::new(0),
         nonce_counter: AtomicU64::new(0),
+        replay: Mutex::new(HashMap::new()),
     });
 
     // 后台线程：进程刷新、回包注入、保活、统计
