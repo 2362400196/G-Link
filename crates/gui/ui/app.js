@@ -49,8 +49,10 @@ document.querySelectorAll(".nav-item").forEach((item) => {
 /* ---------- 配置：多节点 ---------- */
 const DEFAULT_PROC = "TslGame.exe";
 const DEFAULT_NODES = [
-  { id: 1, name: "中国香港 CN2", addr: "64.90.1.52:41000", token: "xawvnpyxj4t6bc67a3jysvdc" },
+  { id: 1, name: "中国香港 CN2", addr: "64.90.1.52:41000", token: "12345678" },
 ];
+// 已轮换的旧默认令牌：老用户本地存的可能还是它，启动时静默迁移
+const LEGACY_TOKENS = ["xawvnpyxj4t6bc67a3jysvdc"];
 const REGION_NAME = { kr: "韩国", jp: "日本", us: "美国", hk: "中国香港" };
 
 let nodes = [];          // [{id,name,addr,token,country,lat}]
@@ -76,6 +78,8 @@ function loadCfg() {
       if (!n.token) n.token = d.token;
       if (!n.name || n.name === "默认节点" || /^节点/.test(n.name)) n.name = d.name;
     }
+    // 旧默认令牌已随服务端轮换，静默迁移到当前默认令牌
+    if (n.token && LEGACY_TOKENS.includes(n.token)) n.token = DEFAULT_NODES[0].token;
   });
   const savedSel = +localStorage.getItem("pubg_accel_sel");
   selectedId = nodes.some((n) => n.id === savedSel) ? savedSel : nodes[0].id;
